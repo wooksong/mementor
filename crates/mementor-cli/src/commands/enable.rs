@@ -1,9 +1,9 @@
 use std::io::{Read, Write};
 
 use mementor_lib::context::MementorContext;
-use mementor_lib::db::connection::open_db;
 use mementor_lib::embedding::embedder::Embedder;
 use mementor_lib::output::ConsoleIO;
+use mementor_lib::runtime::Runtime;
 
 /// Run the `mementor enable` command.
 ///
@@ -11,21 +11,19 @@ use mementor_lib::output::ConsoleIO;
 /// 2. Verify bundled embedding model loads.
 /// 3. Append `.mementor/` to `.gitignore` if not present.
 /// 4. Add mementor hooks to `.claude/settings.json`.
-pub fn run_enable<C, IN, OUT, ERR>(
-    context: &C,
+pub fn run_enable<IN, OUT, ERR>(
+    runtime: &Runtime,
     io: &mut dyn ConsoleIO<IN, OUT, ERR>,
 ) -> anyhow::Result<()>
 where
-    C: MementorContext,
     IN: Read,
     OUT: Write,
     ERR: Write,
 {
-    let db_path = context.db_path();
-
-    // Step 1: Create DB (open_db creates parent dirs + schema + vector_init)
+    // Step 1: Create DB (open creates parent dirs + schema + vector_init)
     writeln!(io.stderr(), "Initializing database...")?;
-    let _conn = open_db(&db_path)?;
+    let _conn = runtime.db.open()?;
+    let db_path = runtime.context.db_path();
     writeln!(io.stderr(), "  Database created at {}", db_path.display())?;
 
     // Step 2: Verify embedding model loads
@@ -34,11 +32,11 @@ where
     writeln!(io.stderr(), "  Embedding model OK")?;
 
     // Step 3: Update .gitignore
-    update_gitignore(context)?;
+    update_gitignore(&runtime.context)?;
     writeln!(io.stderr(), "  .gitignore updated")?;
 
     // Step 4: Configure Claude Code hooks
-    configure_hooks(context)?;
+    configure_hooks(&runtime.context)?;
     writeln!(io.stderr(), "  Claude Code hooks configured")?;
 
     writeln!(io.stdout(), "mementor enabled successfully.")?;
@@ -46,7 +44,7 @@ where
 }
 
 /// Append `.mementor/` to `.gitignore` if not already present.
-fn update_gitignore<C: MementorContext>(ctx: &C) -> anyhow::Result<()> {
+fn update_gitignore(ctx: &MementorContext) -> anyhow::Result<()> {
     let gitignore_path = ctx.gitignore_path();
     let entry = ".mementor/";
 
@@ -66,7 +64,7 @@ fn update_gitignore<C: MementorContext>(ctx: &C) -> anyhow::Result<()> {
 }
 
 /// Add mementor hooks to `.claude/settings.json`.
-fn configure_hooks<C: MementorContext>(ctx: &C) -> anyhow::Result<()> {
+fn configure_hooks(ctx: &MementorContext) -> anyhow::Result<()> {
     let settings_path = ctx.claude_settings_path();
 
     // Ensure .claude/ directory exists
@@ -151,35 +149,41 @@ fn merge_hook_array(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mementor_lib::context::RealMementorContext;
+    use mementor_lib::db::driver::DatabaseDriver;
     use mementor_lib::output::BufferedIO;
+
+    fn test_runtime(tmp: &std::path::Path) -> Runtime {
+        let context = MementorContext::new(tmp.to_path_buf());
+        let db = DatabaseDriver::file(context.db_path());
+        Runtime { context, db }
+    }
 
     #[test]
     fn enable_creates_db_and_gitignore() {
         let tmp = tempfile::tempdir().unwrap();
-        let context = RealMementorContext::new(tmp.path().to_path_buf());
+        let runtime = test_runtime(tmp.path());
         let mut io = BufferedIO::new();
 
-        run_enable(&context, &mut io).unwrap();
+        run_enable(&runtime, &mut io).unwrap();
 
-        assert!(context.db_path().exists());
-        assert!(context.gitignore_path().exists());
-        let gitignore = std::fs::read_to_string(context.gitignore_path()).unwrap();
+        assert!(runtime.context.db_path().exists());
+        assert!(runtime.context.gitignore_path().exists());
+        let gitignore = std::fs::read_to_string(runtime.context.gitignore_path()).unwrap();
         assert!(gitignore.contains(".mementor/"));
     }
 
     #[test]
     fn enable_creates_hooks_config() {
         let tmp = tempfile::tempdir().unwrap();
-        let context = RealMementorContext::new(tmp.path().to_path_buf());
+        let runtime = test_runtime(tmp.path());
         let mut io = BufferedIO::new();
 
-        run_enable(&context, &mut io).unwrap();
+        run_enable(&runtime, &mut io).unwrap();
 
-        let settings_path = context.claude_settings_path();
+        let settings_path = runtime.context.claude_settings_path();
         assert!(settings_path.exists());
-        let content = std::fs::read_to_string(&settings_path).unwrap();
-        let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let raw = std::fs::read_to_string(&settings_path).unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert!(settings["hooks"]["Stop"].is_array());
         assert!(settings["hooks"]["UserPromptSubmit"].is_array());
     }
@@ -187,13 +191,13 @@ mod tests {
     #[test]
     fn enable_is_idempotent() {
         let tmp = tempfile::tempdir().unwrap();
-        let context = RealMementorContext::new(tmp.path().to_path_buf());
+        let runtime = test_runtime(tmp.path());
         let mut io = BufferedIO::new();
 
-        run_enable(&context, &mut io).unwrap();
-        run_enable(&context, &mut io).unwrap();
+        run_enable(&runtime, &mut io).unwrap();
+        run_enable(&runtime, &mut io).unwrap();
 
-        let gitignore = std::fs::read_to_string(context.gitignore_path()).unwrap();
+        let gitignore = std::fs::read_to_string(runtime.context.gitignore_path()).unwrap();
         // Should only contain one .mementor/ entry
         assert_eq!(
             gitignore.matches(".mementor/").count(),
@@ -201,7 +205,8 @@ mod tests {
             "gitignore should not have duplicate entries"
         );
 
-        let settings_content = std::fs::read_to_string(context.claude_settings_path()).unwrap();
+        let settings_content =
+            std::fs::read_to_string(runtime.context.claude_settings_path()).unwrap();
         let settings: serde_json::Value = serde_json::from_str(&settings_content).unwrap();
         assert_eq!(
             settings["hooks"]["Stop"].as_array().unwrap().len(),
@@ -213,26 +218,27 @@ mod tests {
     #[test]
     fn enable_preserves_existing_settings() {
         let tmp = tempfile::tempdir().unwrap();
-        let context = RealMementorContext::new(tmp.path().to_path_buf());
+        let runtime = test_runtime(tmp.path());
         let mut io = BufferedIO::new();
 
         // Create existing settings with custom key
-        let claude_dir = context
+        let claude_dir = runtime
+            .context
             .claude_settings_path()
             .parent()
             .unwrap()
             .to_path_buf();
         std::fs::create_dir_all(&claude_dir).unwrap();
         std::fs::write(
-            context.claude_settings_path(),
+            runtime.context.claude_settings_path(),
             r#"{"customKey": "customValue"}"#,
         )
         .unwrap();
 
-        run_enable(&context, &mut io).unwrap();
+        run_enable(&runtime, &mut io).unwrap();
 
-        let content = std::fs::read_to_string(context.claude_settings_path()).unwrap();
-        let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let raw = std::fs::read_to_string(runtime.context.claude_settings_path()).unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(settings["customKey"], "customValue");
         assert!(settings["hooks"]["Stop"].is_array());
     }

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::Context;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OpenFlags, params};
 
 use crate::config::EMBEDDING_DIMENSION;
 
@@ -16,9 +16,8 @@ unsafe extern "C" {
     ) -> std::ffi::c_int;
 }
 
-/// Open a `SQLite` connection with sqlite-vector loaded and schema applied.
+/// Open a file-backed `SQLite` connection with sqlite-vector loaded and schema applied.
 pub fn open_db(path: &Path) -> anyhow::Result<Connection> {
-    // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
@@ -26,12 +25,35 @@ pub fn open_db(path: &Path) -> anyhow::Result<Connection> {
 
     let mut conn = Connection::open(path)
         .with_context(|| format!("Failed to open database: {}", path.display()))?;
-
-    register_vector_extension(&conn)?;
-    apply_migrations(&mut conn)?;
-    register_vector_table(&conn)?;
-
+    init_connection(&mut conn)?;
     Ok(conn)
+}
+
+/// Open an in-memory `SQLite` connection with sqlite-vector loaded and schema applied.
+///
+/// Uses the `SQLite` URI format with shared-cache mode so multiple connections
+/// can share the same named in-memory database within the same process.
+/// The in-memory database persists as long as at least one connection to it remains open.
+pub fn open_db_in_memory(name: &str) -> anyhow::Result<Connection> {
+    let uri = format!("file:{name}?mode=memory&cache=shared");
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+        | OpenFlags::SQLITE_OPEN_CREATE
+        | OpenFlags::SQLITE_OPEN_URI
+        | OpenFlags::SQLITE_OPEN_SHARED_CACHE
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+
+    let mut conn = Connection::open_with_flags(uri, flags)
+        .with_context(|| format!("Failed to open in-memory database: {name}"))?;
+    init_connection(&mut conn)?;
+    Ok(conn)
+}
+
+/// Load sqlite-vector extension, apply schema migrations, and register vector table.
+fn init_connection(conn: &mut Connection) -> anyhow::Result<()> {
+    register_vector_extension(conn)?;
+    apply_migrations(conn)?;
+    register_vector_table(conn)?;
+    Ok(())
 }
 
 /// Register the sqlite-vector extension into the connection.
@@ -86,6 +108,39 @@ mod tests {
             .query_row("SELECT vector_version()", [], |row| row.get(0))
             .unwrap();
         assert!(!version.is_empty());
+    }
+
+    #[test]
+    fn open_in_memory_works() {
+        let conn = open_db_in_memory("test_open").unwrap();
+        let version: String = conn
+            .query_row("SELECT vector_version()", [], |row| row.get(0))
+            .unwrap();
+        assert!(!version.is_empty());
+    }
+
+    #[test]
+    fn in_memory_shared_cache_persists() {
+        // First connection creates data
+        let conn1 = open_db_in_memory("test_shared").unwrap();
+        conn1
+            .execute(
+                "INSERT INTO sessions (session_id, transcript_path, project_dir, last_line_index)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params!["sess-1", "/tmp/t.jsonl", "/tmp/p", 42],
+            )
+            .unwrap();
+
+        // Second connection sees the same data
+        let conn2 = open_db_in_memory("test_shared").unwrap();
+        let val: i64 = conn2
+            .query_row(
+                "SELECT last_line_index FROM sessions WHERE session_id = ?1",
+                params!["sess-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(val, 42);
     }
 
     #[test]

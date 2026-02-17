@@ -182,14 +182,15 @@ pub fn search_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::connection::open_db;
+    use crate::db::driver::DatabaseDriver;
     use crate::pipeline::chunker::load_tokenizer;
     use std::io::Write;
 
     fn setup_test() -> (tempfile::TempDir, Connection, Embedder, Tokenizer) {
         let tmp = tempfile::tempdir().unwrap();
         let db_path = tmp.path().join("test.db");
-        let conn = open_db(&db_path).unwrap();
+        let driver = DatabaseDriver::file(db_path);
+        let conn = driver.open().unwrap();
         let embedder = Embedder::new().unwrap();
         let tokenizer = load_tokenizer().unwrap();
         (tmp, conn, embedder, tokenizer)

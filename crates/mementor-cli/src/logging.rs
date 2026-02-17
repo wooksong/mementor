@@ -14,7 +14,7 @@ use mementor_lib::context::MementorContext;
 /// When `ctx.log_dir()` is `None`, this is a no-op.
 /// All errors during initialization are silently ignored so that logging
 /// failures never prevent mementor from functioning.
-pub fn init_file_logging<C: MementorContext>(ctx: &C) {
+pub fn init_file_logging(ctx: &MementorContext) {
     let Some(log_dir) = ctx.log_dir() else {
         return;
     };

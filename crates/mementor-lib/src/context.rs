@@ -1,49 +1,13 @@
 use std::path::{Path, PathBuf};
 
-/// Abstracts environment and configuration for dependency injection.
-pub trait MementorContext: Clone {
-    /// Root directory of the project where mementor is enabled.
-    fn project_root(&self) -> &Path;
-
-    /// Optional parent directory for log file output.
-    /// When set, operational logs are written to JSONL files under this path.
-    fn log_dir(&self) -> Option<&Path> {
-        None
-    }
-
-    /// Path to the mementor `SQLite` database file (`mementor.db`).
-    /// Default: `<project_root>/.mementor/mementor.db`
-    fn db_path(&self) -> PathBuf {
-        self.mementor_dir().join("mementor.db")
-    }
-
-    /// Path to the `.mementor/` directory.
-    /// Default: `<project_root>/.mementor/`
-    fn mementor_dir(&self) -> PathBuf {
-        self.project_root().join(".mementor")
-    }
-
-    /// Path to the Claude settings file.
-    /// Default: `<project_root>/.claude/settings.json`
-    fn claude_settings_path(&self) -> PathBuf {
-        self.project_root().join(".claude").join("settings.json")
-    }
-
-    /// Path to the project's `.gitignore` file.
-    /// Default: `<project_root>/.gitignore`
-    fn gitignore_path(&self) -> PathBuf {
-        self.project_root().join(".gitignore")
-    }
-}
-
-/// Real implementation that uses an actual filesystem path.
+/// Environment and configuration for a mementor-enabled project.
 #[derive(Clone, Debug)]
-pub struct RealMementorContext {
+pub struct MementorContext {
     project_root: PathBuf,
     log_dir: Option<PathBuf>,
 }
 
-impl RealMementorContext {
+impl MementorContext {
     /// Create a new context rooted at the given path (no log directory).
     #[must_use]
     pub fn new(project_root: PathBuf) -> Self {
@@ -67,15 +31,40 @@ impl RealMementorContext {
         let cwd = std::env::current_dir()?;
         Ok(Self::new(cwd))
     }
-}
 
-impl MementorContext for RealMementorContext {
-    fn project_root(&self) -> &Path {
+    /// Root directory of the project where mementor is enabled.
+    pub fn project_root(&self) -> &Path {
         &self.project_root
     }
 
-    fn log_dir(&self) -> Option<&Path> {
+    /// Optional parent directory for log file output.
+    /// When set, operational logs are written to JSONL files under this path.
+    pub fn log_dir(&self) -> Option<&Path> {
         self.log_dir.as_deref()
+    }
+
+    /// Path to the mementor `SQLite` database file (`mementor.db`).
+    /// Default: `<project_root>/.mementor/mementor.db`
+    pub fn db_path(&self) -> PathBuf {
+        self.mementor_dir().join("mementor.db")
+    }
+
+    /// Path to the `.mementor/` directory.
+    /// Default: `<project_root>/.mementor/`
+    pub fn mementor_dir(&self) -> PathBuf {
+        self.project_root.join(".mementor")
+    }
+
+    /// Path to the Claude settings file.
+    /// Default: `<project_root>/.claude/settings.json`
+    pub fn claude_settings_path(&self) -> PathBuf {
+        self.project_root.join(".claude").join("settings.json")
+    }
+
+    /// Path to the project's `.gitignore` file.
+    /// Default: `<project_root>/.gitignore`
+    pub fn gitignore_path(&self) -> PathBuf {
+        self.project_root.join(".gitignore")
     }
 }
 
@@ -85,7 +74,7 @@ mod tests {
 
     #[test]
     fn db_path_is_under_mementor_dir() {
-        let ctx = RealMementorContext::new(PathBuf::from("/tmp/project"));
+        let ctx = MementorContext::new(PathBuf::from("/tmp/project"));
         assert_eq!(
             ctx.db_path(),
             PathBuf::from("/tmp/project/.mementor/mementor.db")
@@ -94,13 +83,13 @@ mod tests {
 
     #[test]
     fn mementor_dir_is_under_project_root() {
-        let ctx = RealMementorContext::new(PathBuf::from("/tmp/project"));
+        let ctx = MementorContext::new(PathBuf::from("/tmp/project"));
         assert_eq!(ctx.mementor_dir(), PathBuf::from("/tmp/project/.mementor"));
     }
 
     #[test]
     fn claude_settings_path() {
-        let ctx = RealMementorContext::new(PathBuf::from("/tmp/project"));
+        let ctx = MementorContext::new(PathBuf::from("/tmp/project"));
         assert_eq!(
             ctx.claude_settings_path(),
             PathBuf::from("/tmp/project/.claude/settings.json")
@@ -109,7 +98,7 @@ mod tests {
 
     #[test]
     fn gitignore_path() {
-        let ctx = RealMementorContext::new(PathBuf::from("/tmp/project"));
+        let ctx = MementorContext::new(PathBuf::from("/tmp/project"));
         assert_eq!(
             ctx.gitignore_path(),
             PathBuf::from("/tmp/project/.gitignore")
@@ -118,13 +107,13 @@ mod tests {
 
     #[test]
     fn log_dir_defaults_to_none() {
-        let ctx = RealMementorContext::new(PathBuf::from("/tmp/project"));
+        let ctx = MementorContext::new(PathBuf::from("/tmp/project"));
         assert!(ctx.log_dir().is_none());
     }
 
     #[test]
     fn log_dir_with_explicit_value() {
-        let ctx = RealMementorContext::with_log_dir(
+        let ctx = MementorContext::with_log_dir(
             PathBuf::from("/tmp/project"),
             Some(PathBuf::from("/tmp/logs")),
         );

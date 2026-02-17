@@ -1,30 +1,27 @@
 use std::io::{Read, Write};
 
-use mementor_lib::context::MementorContext;
-use mementor_lib::db::connection::open_db;
 use mementor_lib::embedding::embedder::Embedder;
 use mementor_lib::output::ConsoleIO;
 use mementor_lib::pipeline::ingest::search_context;
+use mementor_lib::runtime::Runtime;
 
 /// Run the `mementor query` command.
-pub fn run_query<C, IN, OUT, ERR>(
+pub fn run_query<IN, OUT, ERR>(
     text: &str,
     k: usize,
-    context: &C,
+    runtime: &Runtime,
     io: &mut dyn ConsoleIO<IN, OUT, ERR>,
 ) -> anyhow::Result<()>
 where
-    C: MementorContext,
     IN: Read,
     OUT: Write,
     ERR: Write,
 {
-    let db_path = context.db_path();
-    if !db_path.exists() {
+    if !runtime.db.is_ready() {
         anyhow::bail!("mementor is not enabled. Run `mementor enable` first.");
     }
 
-    let conn = open_db(&db_path)?;
+    let conn = runtime.db.open()?;
     let mut embedder = Embedder::new()?;
 
     let result = search_context(&conn, &mut embedder, text, k)?;

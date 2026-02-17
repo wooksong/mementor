@@ -4,6 +4,7 @@ pub mod db;
 pub mod embedding;
 pub mod output;
 pub mod pipeline;
+pub mod runtime;
 pub mod transcript;
 
 #[cfg(test)]

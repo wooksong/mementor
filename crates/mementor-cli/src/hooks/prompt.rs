@@ -1,34 +1,31 @@
 use std::io::{Read, Write};
 
 use mementor_lib::config::DEFAULT_TOP_K;
-use mementor_lib::context::MementorContext;
-use mementor_lib::db::connection::open_db;
 use mementor_lib::embedding::embedder::Embedder;
 use mementor_lib::output::ConsoleIO;
 use mementor_lib::pipeline::ingest::search_context;
+use mementor_lib::runtime::Runtime;
 
 use super::input::PromptHookInput;
 
 /// Handle the `UserPromptSubmit` hook: embed prompt, search memories,
 /// output RAG context to stdout.
-pub fn handle_prompt<C, IN, OUT, ERR>(
+pub fn handle_prompt<IN, OUT, ERR>(
     input: &PromptHookInput,
-    context: &C,
+    runtime: &Runtime,
     io: &mut dyn ConsoleIO<IN, OUT, ERR>,
 ) -> anyhow::Result<()>
 where
-    C: MementorContext,
     IN: Read,
     OUT: Write,
     ERR: Write,
 {
-    let db_path = context.db_path();
-    if !db_path.exists() {
+    if !runtime.db.is_ready() {
         // Silently skip — mementor not enabled
         return Ok(());
     }
 
-    let conn = open_db(&db_path)?;
+    let conn = runtime.db.open()?;
     let mut embedder = Embedder::new()?;
 
     let rag_context = search_context(&conn, &mut embedder, &input.prompt, DEFAULT_TOP_K)?;
