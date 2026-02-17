@@ -289,14 +289,20 @@ Every implementation task **must** follow this workflow:
 Run all tests (unit + integration):
 
 ```bash
-cargo test
+mise run test
 ```
+
+This runs `NO_COLOR=1 cargo test` to prevent ANSI escape codes from interfering
+with output assertions.
 
 Run unit tests only:
 
 ```bash
-cargo test --lib
+mise run test:unit
 ```
 
 Tests should be colocated with the code they test (in `#[cfg(test)]` modules)
 for unit tests. Integration tests go in `tests/` directories within each crate.
+
+For the standard subcommand-level integration test pattern (5 rules, helpers,
+and annotated examples), see [`docs/testing-patterns.md`](docs/testing-patterns.md).

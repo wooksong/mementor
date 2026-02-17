@@ -36,3 +36,79 @@ where
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use mementor_lib::embedding::embedder::Embedder;
+    use mementor_lib::output::BufferedIO;
+
+    use crate::test_util::{runtime_in_memory, runtime_not_enabled, seed_memory};
+
+    #[test]
+    fn try_run_hook_prompt_with_results() {
+        let (_tmp, runtime) = runtime_in_memory("hook_prompt_results");
+        let mut embedder = Embedder::new().unwrap();
+
+        let seed_text = "Implementing authentication in Rust";
+        seed_memory(&runtime.db, &mut embedder, "s1", 0, 0, seed_text);
+
+        let stdin_json = serde_json::json!({
+            "session_id": "s2",
+            "prompt": seed_text,
+            "cwd": "/tmp/project"
+        })
+        .to_string();
+        let mut io = BufferedIO::with_stdin(stdin_json.as_bytes());
+
+        crate::try_run(
+            &["mementor", "hook", "user-prompt-submit"],
+            &runtime,
+            &mut io,
+        )
+        .unwrap();
+
+        let expected_stdout = format!(
+            "## Relevant past context\n\n\
+             ### Memory 1 (distance: 0.0000)\n\
+             {seed_text}\n\n",
+        );
+        assert_eq!(io.stdout_to_string(), expected_stdout);
+        assert_eq!(io.stderr_to_string(), "");
+    }
+
+    #[test]
+    fn try_run_hook_prompt_not_enabled() {
+        let (_tmp, runtime) = runtime_not_enabled();
+        let stdin_json = serde_json::json!({
+            "session_id": "s1",
+            "prompt": "How do I do X?",
+            "cwd": "/tmp/project"
+        })
+        .to_string();
+        let mut io = BufferedIO::with_stdin(stdin_json.as_bytes());
+
+        crate::try_run(
+            &["mementor", "hook", "user-prompt-submit"],
+            &runtime,
+            &mut io,
+        )
+        .unwrap();
+
+        assert_eq!(io.stdout_to_string(), "");
+        assert_eq!(io.stderr_to_string(), "");
+    }
+
+    #[test]
+    fn try_run_hook_prompt_invalid_json() {
+        let (_tmp, runtime) = runtime_in_memory("hook_prompt_invalid");
+        let mut io = BufferedIO::with_stdin(b"not valid json");
+
+        let result = crate::try_run(
+            &["mementor", "hook", "user-prompt-submit"],
+            &runtime,
+            &mut io,
+        );
+
+        assert!(result.is_err());
+    }
+}

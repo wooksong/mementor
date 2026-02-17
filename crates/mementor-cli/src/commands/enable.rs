@@ -148,80 +148,83 @@ fn merge_hook_array(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use mementor_lib::db::driver::DatabaseDriver;
     use mementor_lib::output::BufferedIO;
 
-    fn test_runtime(tmp: &std::path::Path) -> Runtime {
-        let context = MementorContext::new(tmp.to_path_buf());
-        let db = DatabaseDriver::file(context.db_path());
-        Runtime { context, db }
-    }
+    use crate::test_util::runtime_in_memory;
+    use crate::test_util::trim_margin;
 
     #[test]
-    fn enable_creates_db_and_gitignore() {
-        let tmp = tempfile::tempdir().unwrap();
-        let runtime = test_runtime(tmp.path());
+    fn try_run_enable_creates_db_and_configures_project() {
+        let (_tmp, runtime) = runtime_in_memory("enable_creates");
         let mut io = BufferedIO::new();
 
-        run_enable(&runtime, &mut io).unwrap();
+        crate::try_run(&["mementor", "enable"], &runtime, &mut io).unwrap();
 
-        assert!(runtime.context.db_path().exists());
-        assert!(runtime.context.gitignore_path().exists());
+        // stdout
+        assert_eq!(io.stdout_to_string(), "mementor enabled successfully.\n");
+
+        // stderr (db_path is dynamic, construct expected string)
+        let db_path = runtime.context.db_path();
+        let db_path = db_path.display();
+        let expected_stderr = trim_margin!(
+            "|Initializing database...
+             |  Database created at {db_path}
+             |Verifying embedding model...
+             |  Embedding model OK
+             |  .gitignore updated
+             |  Claude Code hooks configured
+             |"
+        );
+        assert_eq!(io.stderr_to_string(), expected_stderr);
+
+        // .gitignore
         let gitignore = std::fs::read_to_string(runtime.context.gitignore_path()).unwrap();
-        assert!(gitignore.contains(".mementor/"));
-    }
+        assert_eq!(gitignore, ".mementor/\n");
 
-    #[test]
-    fn enable_creates_hooks_config() {
-        let tmp = tempfile::tempdir().unwrap();
-        let runtime = test_runtime(tmp.path());
-        let mut io = BufferedIO::new();
-
-        run_enable(&runtime, &mut io).unwrap();
-
-        let settings_path = runtime.context.claude_settings_path();
-        assert!(settings_path.exists());
-        let raw = std::fs::read_to_string(&settings_path).unwrap();
+        // .claude/settings.json
+        let raw = std::fs::read_to_string(runtime.context.claude_settings_path()).unwrap();
         let settings: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert!(settings["hooks"]["Stop"].is_array());
         assert!(settings["hooks"]["UserPromptSubmit"].is_array());
     }
 
     #[test]
-    fn enable_is_idempotent() {
-        let tmp = tempfile::tempdir().unwrap();
-        let runtime = test_runtime(tmp.path());
+    fn try_run_enable_is_idempotent() {
+        let (_tmp, runtime) = runtime_in_memory("enable_idempotent");
         let mut io = BufferedIO::new();
 
-        run_enable(&runtime, &mut io).unwrap();
-        run_enable(&runtime, &mut io).unwrap();
+        crate::try_run(&["mementor", "enable"], &runtime, &mut io).unwrap();
 
+        let mut io2 = BufferedIO::new();
+        crate::try_run(&["mementor", "enable"], &runtime, &mut io2).unwrap();
+
+        // Both runs produce identical stderr
+        assert_eq!(io.stderr_to_string(), io2.stderr_to_string());
+
+        // No duplicate .gitignore entries
         let gitignore = std::fs::read_to_string(runtime.context.gitignore_path()).unwrap();
-        // Should only contain one .mementor/ entry
         assert_eq!(
             gitignore.matches(".mementor/").count(),
             1,
-            "gitignore should not have duplicate entries"
+            "gitignore should not have duplicate entries",
         );
 
-        let settings_content =
-            std::fs::read_to_string(runtime.context.claude_settings_path()).unwrap();
-        let settings: serde_json::Value = serde_json::from_str(&settings_content).unwrap();
+        // No duplicate hook entries
+        let raw = std::fs::read_to_string(runtime.context.claude_settings_path()).unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(
             settings["hooks"]["Stop"].as_array().unwrap().len(),
             1,
-            "Stop hooks should not have duplicates"
+            "Stop hooks should not have duplicates",
         );
     }
 
     #[test]
-    fn enable_preserves_existing_settings() {
-        let tmp = tempfile::tempdir().unwrap();
-        let runtime = test_runtime(tmp.path());
+    fn try_run_enable_preserves_existing_settings() {
+        let (_tmp, runtime) = runtime_in_memory("enable_preserves");
         let mut io = BufferedIO::new();
 
-        // Create existing settings with custom key
+        // Pre-create settings.json with a custom key
         let claude_dir = runtime
             .context
             .claude_settings_path()
@@ -235,7 +238,7 @@ mod tests {
         )
         .unwrap();
 
-        run_enable(&runtime, &mut io).unwrap();
+        crate::try_run(&["mementor", "enable"], &runtime, &mut io).unwrap();
 
         let raw = std::fs::read_to_string(runtime.context.claude_settings_path()).unwrap();
         let settings: serde_json::Value = serde_json::from_str(&raw).unwrap();

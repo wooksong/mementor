@@ -1,2 +1,10 @@
 [tools]
 rust = "1.93.1"
+
+[tasks.test]
+run = "NO_COLOR=1 cargo test"
+description = "Run all tests with ANSI colors disabled"
+
+[tasks."test:unit"]
+run = "NO_COLOR=1 cargo test --lib"
+description = "Run unit tests only with ANSI colors disabled"

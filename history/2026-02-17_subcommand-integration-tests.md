@@ -1,7 +1,7 @@
 # Subcommand-Level Integration Tests
 
 **Date**: 2026-02-17
-**Status**: Deferred (prerequisite DI refactoring needed first)
+**Status**: Complete
 
 ## Background
 
@@ -9,20 +9,19 @@ Mementor's CLI tests at the subcommand level were incomplete. Some subcommands
 had no tests at all, and existing tests called `run_xxx()` functions directly
 rather than going through the `try_run()` CLI dispatcher.
 
-### Current Test Coverage (before this task)
+### Test Coverage (before → after)
 
-| Subcommand | Tests | Pattern |
-|------------|-------|---------|
-| `enable` | 4 | Direct `run_enable()` call |
-| `ingest` | 0 | Only lib-level pipeline tests |
-| `query` | 0 | None |
-| `hook stop` | 0 | Only input parsing tests |
-| `hook user-prompt-submit` | 0 | Only input parsing tests |
+| Subcommand | Before | After | Pattern |
+|------------|--------|-------|---------|
+| `enable` | 4 (direct `run_enable()`) | 3 (via `try_run()`) | Replaced |
+| `ingest` | 0 | 3 | New |
+| `query` | 0 | 3 | New |
+| `hook stop` | 0 | 3 | New |
+| `hook user-prompt-submit` | 0 | 3 | New |
 
-## Goals
+**Net change**: 4 existing tests replaced, 15 new tests added → +11 tests.
 
-Establish a consistent integration test pattern for all subcommands with these
-5 rules:
+## The 5 Rules
 
 1. **Location**: Tests live in the same file as the `run_xxx()` function.
 2. **Invocation**: Call `try_run()` with simulated CLI args, not `run_xxx()`
@@ -35,21 +34,43 @@ Establish a consistent integration test pattern for all subcommands with these
 5. **Full output matching**: Assert the entire stdout buffer and entire stderr
    buffer with `assert_eq!`, not partial `.contains()` checks.
 
-## Design Plan
+## Implementation
 
-### Test Helpers (`test_util.rs`)
+### Prerequisites
 
-- `write_transcript(dir, lines)` — create JSONL transcript file
-- `make_entry(role, text)` — build a transcript JSONL line
-- `seed_memory(db_path, session_id, content)` — insert seed data with real
-  embeddings
+PR #7 completed the DI refactoring that made in-memory DB injection possible:
 
-### Planned Tests Per Subcommand
+- `DatabaseDriver` enum (`File` / `InMemory`) as a connection factory
+- `Runtime` struct bundling `MementorContext` + `DatabaseDriver`
+- `DatabaseDriver::in_memory(name)` uses SQLite shared-cache mode so that
+  seeded data is visible to subsequent `open()` calls
 
-**enable.rs** (replace 4 existing tests):
-- `enable_creates_db_and_configures_project`
-- `enable_is_idempotent`
-- `enable_preserves_existing_settings`
+### Test Helpers (`crates/mementor-cli/src/test_util.rs`)
+
+| Helper | Purpose |
+|--------|---------|
+| `runtime_in_memory(name)` | In-memory DB + tempdir context |
+| `runtime_not_enabled()` | File DB at nonexistent path (`is_ready()` = false) |
+| `seed_memory(driver, embedder, ...)` | Upsert session + embed + insert memory |
+| `make_entry(role, text)` | JSONL transcript line |
+| `write_transcript(dir, lines)` | Create transcript file |
+
+### Key Design Decisions
+
+- **Real embeddings for seeding**: `seed_memory` uses the real `Embedder` to
+  generate vectors. When the test queries with the same text, cosine distance
+  is exactly `0.0000` (deterministic), enabling full output matching.
+- **`NO_COLOR=1`**: Added `[tasks.test]` to `mise.toml` to prevent ANSI escape
+  codes from breaking `assert_eq!` comparisons.
+- **Deterministic UUIDs**: `make_entry` uses an `AtomicUsize` counter instead
+  of time-based randomness.
+
+### Tests Implemented
+
+**enable.rs** (3 tests, replacing 4 existing):
+- `try_run_enable_creates_db_and_configures_project`
+- `try_run_enable_is_idempotent`
+- `try_run_enable_preserves_existing_settings`
 
 **ingest.rs** (3 new):
 - `try_run_ingest_success`
@@ -71,41 +92,9 @@ Establish a consistent integration test pattern for all subcommands with these
 - `try_run_hook_prompt_not_enabled`
 - `try_run_hook_prompt_invalid_json`
 
-## Technical Bottleneck
+## Completed Work
 
-Rule 3 (in-memory SQLite isolation) conflicts with the current architecture:
-
-- Subcommands open DB connections internally via
-  `open_db(context.db_path())` — a file-path-based function.
-- `try_run()` dispatches to subcommands which call `open_db()` themselves.
-- There is no way to inject an in-memory `:memory:` connection because the
-  subcommand owns the DB lifecycle.
-- For seeding, the test would insert data into an in-memory DB, but the
-  subcommand would open a **different** in-memory DB (each
-  `Connection::open(":memory:")` creates a new database).
-
-### Failed Approach: tempdir
-
-Using `tempfile::tempdir()` with file-based SQLite achieves test isolation but
-violates Rule 3 (each test should use an in-memory instance). The user
-explicitly requested in-memory DB injection via DI refactoring.
-
-## Decision
-
-Pivot to a prerequisite DI refactoring session:
-
-1. Add `DatabaseDriver` enum (File / InMemory) as a connection factory.
-2. Convert `MementorContext` from trait to concrete struct (eliminate
-   unnecessary `C` type parameter).
-3. Bundle dependencies into a `Runtime` struct for future extensibility.
-
-Once the DI refactoring is complete, the integration tests can be written
-using `DatabaseDriver::in_memory()` with SQLite shared-cache mode.
-
-## Future Work
-
-- [ ] Implement the 5-rule integration test pattern after DI refactoring
-- [ ] Create test pattern guide at `docs/testing-patterns.md` documenting the
-  5-rule integration test pattern, helper utilities, and examples so that future
-  test authors follow a consistent approach
-- [ ] Add a link from `CLAUDE.md` (Testing section) to `docs/testing-patterns.md`
+- [x] Implement the 5-rule integration test pattern after DI refactoring
+- [x] Create test pattern guide at `docs/testing-patterns.md`
+- [x] Add a link from `CLAUDE.md` (Testing section) to `docs/testing-patterns.md`
+- [x] Add `[tasks.test]` to `mise.toml` with `NO_COLOR=1`
