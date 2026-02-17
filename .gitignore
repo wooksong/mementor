@@ -1,2 +1,4 @@
 /target
 .claude/settings.*.json
+.mementor/
+mise.local.toml

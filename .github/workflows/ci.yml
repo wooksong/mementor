@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  MISE_DATA_DIR: ~/.local/share/mise
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    name: macOS (${{ matrix.arch }})
+
+    env:
+      ORT_DYLIB_PATH: ${{ matrix.ort-dylib-path }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            cache-key-prefix: macos-aarch64
+            cargo-target: ""
+            ort-dylib-path: ""
+            extra-rustup: ""
+            setup-ort: "true"
+            check-fmt: "cargo fmt --check"
+          - arch: x86_64
+            cache-key-prefix: macos-x86_64
+            cargo-target: "--target x86_64-apple-darwin"
+            ort-dylib-path: "/usr/local/lib/libonnxruntime.dylib"
+            extra-rustup: "rustup target add x86_64-apple-darwin"
+            setup-ort: |
+              if [ ! -f /usr/local/bin/brew ]; then
+                arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+              fi
+              arch -x86_64 /usr/local/bin/brew install onnxruntime
+            check-fmt: "true"
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          lfs: true
+
+      - uses: ./.github/actions/setup-mise-macos
+        with:
+          cache-key-prefix: ${{ matrix.cache-key-prefix }}
+
+      - name: Cache cargo
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.cache-key-prefix }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ matrix.cache-key-prefix }}-cargo-
+
+      - name: Cache x86_64 ONNX Runtime
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            /usr/local/Homebrew
+            /usr/local/Cellar/onnxruntime
+          key: ${{ matrix.cache-key-prefix }}-ort-homebrew
+          restore-keys: ${{ matrix.cache-key-prefix }}-ort-homebrew
+
+      - name: Install Rust components
+        run: |
+          rustup component add clippy rustfmt
+          ${{ matrix.extra-rustup }}
+
+      - name: Setup ONNX Runtime
+        run: ${{ matrix.setup-ort }}
+
+      - name: Check formatting
+        run: ${{ matrix.check-fmt }}
+
+      - name: Clippy
+        run: cargo clippy ${{ matrix.cargo-target }} -- -D warnings
+
+      - name: Test
+        run: cargo test ${{ matrix.cargo-target }}
+
+      - name: Build (release)
+        run: cargo build --release ${{ matrix.cargo-target }}

@@ -6,7 +6,8 @@
       "Bash(./scripts/update-sqlite-vector.sh:*)",
       "Bash(ls:*)",
       "Bash(find:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Skill(commit)"
     ]
   },
   "attribution": {

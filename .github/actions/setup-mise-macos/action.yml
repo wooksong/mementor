@@ -1,0 +1,31 @@
+name: Setup mise (macOS)
+description: Install mise, activate it, and install tools defined in mise.toml
+
+inputs:
+  cache-key-prefix:
+    description: Cache key prefix for distinguishing targets
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Cache mise
+      uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      with:
+        path: ~/.local/share/mise
+        key: ${{ inputs.cache-key-prefix }}-mise-${{ hashFiles('mise.toml') }}
+        restore-keys: ${{ inputs.cache-key-prefix }}-mise-
+
+    - name: Install mise
+      shell: bash
+      run: curl https://mise.run | sh
+
+    - name: Activate mise
+      shell: bash
+      run: |
+        echo 'eval "$(mise activate bash)"' >> ${RUNNER_TEMP}/mise-activate.sh
+        echo "BASH_ENV=${RUNNER_TEMP}/mise-activate.sh" >> "$GITHUB_ENV"
+
+    - name: Install tools via mise
+      shell: bash
+      run: mise trust && mise install

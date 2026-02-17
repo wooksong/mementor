@@ -1,0 +1,12 @@
+[package]
+name = "mementor"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1.0.101"
+mementor-cli = { version = "0.1.0", path = "../mementor-cli" }
+mementor-lib = { version = "0.1.0", path = "../mementor-lib" }
