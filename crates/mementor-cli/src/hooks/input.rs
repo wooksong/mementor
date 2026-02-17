@@ -4,10 +4,8 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct StopHookInput {
     /// The session ID of the Claude Code conversation.
-    #[serde(rename = "sessionId")]
     pub session_id: String,
     /// Path to the JSONL transcript file.
-    #[serde(rename = "transcriptPath")]
     pub transcript_path: String,
     /// The project working directory.
     pub cwd: String,
@@ -17,7 +15,6 @@ pub struct StopHookInput {
 #[derive(Debug, Deserialize)]
 pub struct PromptHookInput {
     /// The session ID of the Claude Code conversation.
-    #[serde(rename = "sessionId")]
     pub session_id: String,
     /// The user's prompt text.
     pub prompt: String,
@@ -47,7 +44,7 @@ mod tests {
 
     #[test]
     fn parse_stop_input() {
-        let json = r#"{"sessionId": "abc-123", "transcriptPath": "/tmp/transcript.jsonl", "cwd": "/home/user/project"}"#;
+        let json = r#"{"session_id": "abc-123", "transcript_path": "/tmp/transcript.jsonl", "cwd": "/home/user/project"}"#;
         let input = read_stop_input(&mut json.as_bytes()).unwrap();
         assert_eq!(input.session_id, "abc-123");
         assert_eq!(input.transcript_path, "/tmp/transcript.jsonl");
@@ -56,7 +53,7 @@ mod tests {
 
     #[test]
     fn parse_prompt_input() {
-        let json = r#"{"sessionId": "abc-123", "prompt": "How do I fix the bug?", "cwd": "/home/user/project"}"#;
+        let json = r#"{"session_id": "abc-123", "prompt": "How do I fix the bug?", "cwd": "/home/user/project"}"#;
         let input = read_prompt_input(&mut json.as_bytes()).unwrap();
         assert_eq!(input.session_id, "abc-123");
         assert_eq!(input.prompt, "How do I fix the bug?");
@@ -64,7 +61,7 @@ mod tests {
 
     #[test]
     fn missing_field_errors() {
-        let json = r#"{"sessionId": "abc"}"#;
+        let json = r#"{"session_id": "abc"}"#;
         let result = read_stop_input(&mut json.as_bytes());
         assert!(result.is_err());
     }

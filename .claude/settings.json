@@ -1,4 +1,30 @@
 {
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "mementor hook stop",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "mementor hook user-prompt-submit",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(cargo:*)",
@@ -9,9 +35,5 @@
       "Bash(grep:*)",
       "Skill(commit)"
     ]
-  },
-  "attribution": {
-    "commit": "",
-    "pr": ""
   }
 }
