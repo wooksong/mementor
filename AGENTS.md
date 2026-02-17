@@ -263,6 +263,27 @@ history/YYYY-MM-DD_what-we-do.md
 Each document includes background, goals, design decisions, a TODO checklist,
 and future work items.
 
+## Workflow
+
+Every implementation task **must** follow this workflow:
+
+1. **Create a feature branch**: Use `git worktree add` to create a new worktree
+   with a feature branch. After creation, set up the worktree environment:
+   - Copy `mise.local.toml` from the main worktree (gitignored, machine-local).
+   - Run `mise install` to install the toolchain.
+   - Run `mise trust` to trust the configuration
+
+2. **Create a history document**: Before writing any code, create a task
+   document at `history/YYYY-MM-DD_task-name.md` with background, goals,
+   design decisions, and a TODO checklist.
+
+3. **Track progress**: Use todo tracking throughout the session. Mark items as
+   in-progress when starting and completed when done.
+
+4. **Update the history document**: When the task is complete, update the
+   history document with final results, any deviations from the original plan,
+   and future work items.
+
 ## Testing
 
 Run all tests (unit + integration):
