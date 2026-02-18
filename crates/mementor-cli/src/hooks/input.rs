@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 /// Input received from the Claude Code Stop hook via stdin.
 #[derive(Debug, Deserialize)]
@@ -16,10 +16,17 @@ pub struct StopHookInput {
 pub struct PromptHookInput {
     /// The session ID of the Claude Code conversation.
     pub session_id: String,
-    /// The user's prompt text.
+    /// The user's prompt text. May be null when users send only @-file
+    /// references without a text prompt.
+    #[serde(default, deserialize_with = "nullable_string")]
     pub prompt: String,
     /// The project working directory.
     pub cwd: String,
+}
+
+/// Deserialize a string that may be JSON `null` into an empty string.
+fn nullable_string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Option::<String>::deserialize(d).map(Option::unwrap_or_default)
 }
 
 /// Read and parse the stop hook input from stdin.
@@ -105,6 +112,22 @@ mod tests {
         let json = r#"{"session_id": "abc-123", "transcript_path": "/tmp/t.jsonl", "cwd": "/tmp", "trigger": "auto"}"#;
         let input = read_pre_compact_input(&mut json.as_bytes()).unwrap();
         assert!(input.custom_instructions.is_empty());
+    }
+
+    #[test]
+    fn parse_prompt_input_null_prompt() {
+        let json = r#"{"session_id": "abc-123", "prompt": null, "cwd": "/home/user/project"}"#;
+        let input = read_prompt_input(&mut json.as_bytes()).unwrap();
+        assert_eq!(input.session_id, "abc-123");
+        assert!(input.prompt.is_empty());
+    }
+
+    #[test]
+    fn parse_prompt_input_missing_prompt() {
+        let json = r#"{"session_id": "abc-123", "cwd": "/home/user/project"}"#;
+        let input = read_prompt_input(&mut json.as_bytes()).unwrap();
+        assert_eq!(input.session_id, "abc-123");
+        assert!(input.prompt.is_empty());
     }
 
     #[test]

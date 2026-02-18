@@ -29,6 +29,14 @@ where
         "Hook received"
     );
 
+    if input.prompt.is_empty() {
+        debug!(
+            hook = "UserPromptSubmit",
+            "prompt is empty, skipping recall"
+        );
+        return Ok(());
+    }
+
     if !runtime.db.is_ready() {
         // Silently skip — mementor not enabled
         return Ok(());
@@ -105,6 +113,29 @@ mod tests {
         let stdin_json = serde_json::json!({
             "session_id": "s1",
             "prompt": "How do I do X?",
+            "cwd": "/tmp/project"
+        })
+        .to_string();
+        let mut io = BufferedIO::with_stdin(stdin_json.as_bytes());
+
+        crate::try_run(
+            &["mementor", "hook", "user-prompt-submit"],
+            &runtime,
+            &mut io,
+        )
+        .unwrap();
+
+        assert_eq!(io.stdout_to_string(), "");
+        assert_eq!(io.stderr_to_string(), "");
+    }
+
+    #[test]
+    fn try_run_hook_prompt_null_prompt() {
+        let (_tmp, runtime) = runtime_in_memory("hook_prompt_null");
+
+        let stdin_json = serde_json::json!({
+            "session_id": "s1",
+            "prompt": null,
             "cwd": "/tmp/project"
         })
         .to_string();
