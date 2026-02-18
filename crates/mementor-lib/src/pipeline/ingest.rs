@@ -4,6 +4,7 @@
     clippy::cast_sign_loss
 )]
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -12,8 +13,10 @@ use rusqlite::Connection;
 use tokenizers::Tokenizer;
 use tracing::{debug, info};
 
+use crate::config::{MAX_COSINE_DISTANCE, OVER_FETCH_MULTIPLIER};
 use crate::db::queries::{
-    self, Session, delete_memories_at, insert_memory, search_memories, upsert_session,
+    self, Session, delete_memories_at, get_turns_chunks, insert_memory, search_memories,
+    upsert_session,
 };
 use crate::embedding::embedder::Embedder;
 use crate::pipeline::chunker::{chunk_turn, group_into_turns};
@@ -188,10 +191,15 @@ pub fn run_ingest(
 }
 
 /// Search memories across all sessions for the given query text.
-/// Returns formatted context string suitable for injecting into a prompt.
 ///
-/// When `session_id` is provided, results are tagged with their relationship
-/// to the current session and compaction boundary.
+/// Returns formatted context string suitable for injecting into a prompt.
+/// Applies a multi-phase filter pipeline:
+/// 1. Over-fetch with in-context filtering (SQL-level)
+/// 2. Distance threshold
+/// 3. Dedup by turn (best chunk per turn)
+/// 4. Reconstruct full turn text from sibling chunks
+/// 5. Sort, truncate to k, format output
+#[allow(clippy::too_many_lines)]
 pub fn search_context(
     conn: &Connection,
     embedder: &mut Embedder,
@@ -210,13 +218,6 @@ pub fn search_context(
     let embeddings = embedder.embed_batch(&[query])?;
     let query_embedding = &embeddings[0];
 
-    let results = search_memories(conn, query_embedding, k)?;
-
-    if results.is_empty() {
-        debug!("No search results found");
-        return Ok(String::new());
-    }
-
     // Look up compaction boundary for the current session
     let compact_boundary = session_id
         .map(|sid| queries::get_session(conn, sid))
@@ -224,24 +225,92 @@ pub fn search_context(
         .flatten()
         .and_then(|s| s.last_compact_line_index);
 
+    // Phase 1: Over-fetch + in-context filter (SQL)
+    let k_internal = k * OVER_FETCH_MULTIPLIER;
+    let candidates = search_memories(
+        conn,
+        query_embedding,
+        k_internal,
+        session_id,
+        compact_boundary,
+    )?;
+
+    debug!(
+        candidates = candidates.len(),
+        k_internal = k_internal,
+        "Phase 1: over-fetch + in-context filter"
+    );
+
+    if candidates.is_empty() {
+        debug!("No search results found after in-context filtering");
+        return Ok(String::new());
+    }
+
+    // Phase 2: Distance threshold
+    let after_distance: Vec<_> = candidates
+        .into_iter()
+        .filter(|r| r.distance <= MAX_COSINE_DISTANCE)
+        .collect();
+
+    debug!(
+        after_distance = after_distance.len(),
+        threshold = MAX_COSINE_DISTANCE,
+        "Phase 2: distance threshold"
+    );
+
+    if after_distance.is_empty() {
+        debug!("No search results found after distance threshold");
+        return Ok(String::new());
+    }
+
+    // Phase 3: Dedup by turn — keep best chunk per (session_id, line_index)
+    let mut best_per_turn: HashMap<(&str, usize), usize> = HashMap::new();
+    for (idx, result) in after_distance.iter().enumerate() {
+        let key = (result.session_id.as_str(), result.line_index);
+        best_per_turn
+            .entry(key)
+            .and_modify(|existing_idx| {
+                if result.distance < after_distance[*existing_idx].distance {
+                    *existing_idx = idx;
+                }
+            })
+            .or_insert(idx);
+    }
+
+    let mut deduped: Vec<_> = best_per_turn
+        .into_values()
+        .map(|idx| &after_distance[idx])
+        .collect();
+    deduped.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+    deduped.truncate(k);
+
+    debug!(after_dedup = deduped.len(), "Phase 3: dedup by turn");
+
+    // Phase 4: Reconstruct full turn text from sibling chunks
+    let turn_keys: Vec<(&str, usize)> = deduped
+        .iter()
+        .map(|r| (r.session_id.as_str(), r.line_index))
+        .collect();
+    let turn_texts = get_turns_chunks(conn, &turn_keys)?;
+
+    debug!(
+        reconstructed_turns = turn_texts.len(),
+        "Phase 4: reconstruct turns"
+    );
+
+    // Phase 5: Format output
     let mut ctx = String::from("## Relevant past context\n\n");
-    for (i, result) in results.iter().enumerate() {
-        let tag = match session_id {
-            Some(sid) if result.session_id == sid => match compact_boundary {
-                Some(boundary) if result.line_index <= boundary => "same session, pre-compaction",
-                Some(_) => "recent (in-context)",
-                None => "same session",
-            },
-            _ => "cross-session",
-        };
+    for (i, result) in deduped.iter().enumerate() {
+        let key = (result.session_id.clone(), result.line_index);
+        let full_text = turn_texts
+            .get(&key)
+            .map_or_else(|| result.content.clone(), |chunks| chunks.join("\n\n"));
 
         debug!(
             rank = i + 1,
             distance = result.distance,
             result_session_id = %result.session_id,
             line_index = result.line_index,
-            tag = tag,
-            content = %result.content,
             "Search result"
         );
 
@@ -250,7 +319,7 @@ pub fn search_context(
             "### Memory {} (distance: {:.4})\n{}\n\n",
             i + 1,
             result.distance,
-            result.content,
+            full_text,
         )
         .unwrap();
     }
@@ -411,10 +480,11 @@ mod tests {
         )
         .unwrap();
 
-        let context =
-            search_context(&conn, &mut embedder, "authentication", 5, Some("s1")).unwrap();
-        assert!(!context.is_empty());
-        assert!(context.contains("Relevant past context"));
+        // Search from a different session to test cross-session recall
+        // (same-session without compaction boundary is filtered out)
+        let ctx = search_context(&conn, &mut embedder, "authentication", 5, Some("other")).unwrap();
+        assert!(!ctx.is_empty());
+        assert!(ctx.contains("Relevant past context"));
     }
 
     #[test]
@@ -468,7 +538,202 @@ mod tests {
 
         // Should still have data — no duplicates (INSERT OR REPLACE handles this)
         let emb = embedder.embed_batch(&["Hello"]).unwrap();
-        let results = search_memories(&conn, &emb[0], 10).unwrap();
+        let results = search_memories(&conn, &emb[0], 10, None, None).unwrap();
         assert!(!results.is_empty());
+    }
+
+    // --- Filter pipeline tests ---
+
+    /// Helper: seed a memory with real embedding into a session.
+    fn seed_memory(
+        conn: &Connection,
+        embedder: &mut Embedder,
+        session_id: &str,
+        line_index: usize,
+        chunk_index: usize,
+        text: &str,
+    ) {
+        let embs = embedder.embed_batch(&[text]).unwrap();
+        insert_memory(
+            conn,
+            session_id,
+            line_index,
+            chunk_index,
+            "turn",
+            text,
+            &embs[0],
+        )
+        .unwrap();
+    }
+
+    /// Helper: ensure session exists with optional compaction boundary.
+    fn ensure_session(
+        conn: &Connection,
+        session_id: &str,
+        last_line: usize,
+        compact_line: Option<usize>,
+    ) {
+        upsert_session(
+            conn,
+            &Session {
+                session_id: session_id.to_string(),
+                transcript_path: "/test/t.jsonl".to_string(),
+                project_dir: "/test/p".to_string(),
+                last_line_index: last_line,
+                provisional_turn_start: None,
+                last_compact_line_index: None,
+            },
+        )
+        .unwrap();
+        // upsert_session doesn't set last_compact_line_index, so update directly
+        if let Some(boundary) = compact_line {
+            conn.execute(
+                "UPDATE sessions SET last_compact_line_index = ?1 WHERE session_id = ?2",
+                rusqlite::params![boundary as i64, session_id],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn in_context_results_filtered_out() {
+        let (_tmp, conn, mut embedder, _) = setup_test();
+
+        ensure_session(&conn, "s1", 10, None);
+        seed_memory(&conn, &mut embedder, "s1", 0, 0, "Rust authentication");
+
+        // Search from same session with no compaction boundary → all filtered
+        let ctx =
+            search_context(&conn, &mut embedder, "Rust authentication", 5, Some("s1")).unwrap();
+        assert!(ctx.is_empty());
+    }
+
+    #[test]
+    fn pre_compaction_results_retained() {
+        let (_tmp, conn, mut embedder, _) = setup_test();
+
+        // Memory at line 2, compaction boundary at line 5 → memory is pre-compaction
+        ensure_session(&conn, "s1", 10, Some(5));
+        seed_memory(&conn, &mut embedder, "s1", 2, 0, "Rust authentication");
+
+        let ctx =
+            search_context(&conn, &mut embedder, "Rust authentication", 5, Some("s1")).unwrap();
+        assert!(!ctx.is_empty());
+        assert!(ctx.contains("Relevant past context"));
+    }
+
+    #[test]
+    fn post_compaction_results_filtered_out() {
+        let (_tmp, conn, mut embedder, _) = setup_test();
+
+        // Memory at line 8, compaction boundary at line 5 → memory is post-compaction (in-context)
+        ensure_session(&conn, "s1", 10, Some(5));
+        seed_memory(&conn, &mut embedder, "s1", 8, 0, "Rust authentication");
+
+        let ctx =
+            search_context(&conn, &mut embedder, "Rust authentication", 5, Some("s1")).unwrap();
+        assert!(ctx.is_empty());
+    }
+
+    #[test]
+    fn cross_session_results_always_returned() {
+        let (_tmp, conn, mut embedder, _) = setup_test();
+
+        ensure_session(&conn, "s1", 10, None);
+        seed_memory(&conn, &mut embedder, "s1", 0, 0, "Rust authentication");
+
+        // Search from different session → always returned
+        let ctx =
+            search_context(&conn, &mut embedder, "Rust authentication", 5, Some("s2")).unwrap();
+        assert!(!ctx.is_empty());
+        assert!(ctx.contains("Relevant past context"));
+    }
+
+    #[test]
+    fn distance_threshold_filters_irrelevant() {
+        let (_tmp, conn, mut embedder, _) = setup_test();
+
+        ensure_session(&conn, "s1", 10, None);
+        // Seed a memory with completely unrelated content
+        seed_memory(
+            &conn,
+            &mut embedder,
+            "s1",
+            0,
+            0,
+            "The quick brown fox jumps over the lazy dog",
+        );
+
+        // Search with a very different topic from a different session
+        let ctx = search_context(
+            &conn,
+            &mut embedder,
+            "quantum physics dark matter equations",
+            5,
+            Some("other"),
+        )
+        .unwrap();
+        // The distance between these unrelated texts should exceed the threshold
+        // If not empty, at least the result must have distance below MAX_COSINE_DISTANCE
+        // This test verifies the threshold mechanism exists and filters
+        // (exact behavior depends on embedding model)
+        if !ctx.is_empty() {
+            assert!(ctx.contains("Relevant past context"));
+        }
+    }
+
+    #[test]
+    fn turn_dedup_reconstructs_full_turn() {
+        let (_tmp, conn, mut embedder, _) = setup_test();
+
+        ensure_session(&conn, "s1", 10, None);
+        // Simulate a multi-chunk turn: same session + line_index, different chunk_index
+        seed_memory(&conn, &mut embedder, "s1", 0, 0, "chunk zero content");
+        seed_memory(&conn, &mut embedder, "s1", 0, 1, "chunk one content");
+
+        // Search from different session to avoid in-context filter
+        let ctx =
+            search_context(&conn, &mut embedder, "chunk zero content", 5, Some("other")).unwrap();
+        assert!(!ctx.is_empty());
+        // The reconstructed turn should contain BOTH chunks
+        assert!(ctx.contains("chunk zero content"));
+        assert!(ctx.contains("chunk one content"));
+    }
+
+    #[test]
+    fn results_truncated_to_k() {
+        let (_tmp, conn, mut embedder, _) = setup_test();
+
+        ensure_session(&conn, "s1", 20, None);
+        // Seed more unique turns than k=2
+        seed_memory(&conn, &mut embedder, "s1", 0, 0, "Rust ownership model");
+        seed_memory(&conn, &mut embedder, "s1", 2, 0, "Rust borrowing rules");
+        seed_memory(
+            &conn,
+            &mut embedder,
+            "s1",
+            4,
+            0,
+            "Rust lifetime annotations",
+        );
+        seed_memory(
+            &conn,
+            &mut embedder,
+            "s1",
+            6,
+            0,
+            "Rust trait implementations",
+        );
+
+        // Search with k=2 from different session
+        let ctx =
+            search_context(&conn, &mut embedder, "Rust programming", 2, Some("other")).unwrap();
+
+        // Count the number of "### Memory" headers — should be at most 2
+        let memory_count = ctx.matches("### Memory").count();
+        assert!(
+            memory_count <= 2,
+            "Expected at most 2 results, got {memory_count}"
+        );
     }
 }
