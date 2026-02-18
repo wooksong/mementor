@@ -37,14 +37,49 @@
   },
   "permissions": {
     "allow": [
-      "Bash(cargo:*)",
-      "Bash(rustc --print:*)",
-      "Bash(./scripts/update-sqlite-vector.sh:*)",
-      "Bash(ls:*)",
-      "Bash(find:*)",
-      "Bash(grep:*)",
+      "WebFetch",
+      "WebSearch",
       "Skill(commit)",
-      "Skill(worktree)"
+      "Skill(worktree)",
+
+      "Bash(cargo *)",
+      "Bash(rustc --print *)",
+      "Bash(mise *)",
+      "Bash(./scripts/update-sqlite-vector.sh *)",
+      "Bash(./target/release/mementor enable *)",
+
+      "Bash(git add *)",
+      "Bash(git branch *)",
+      "Bash(git checkout *)",
+      "Bash(git fetch *)",
+      "Bash(git lfs *)",
+      "Bash(git ls-remote *)",
+      "Bash(git pull *)",
+      "Bash(git worktree *)",
+
+      "Bash(gh auth *)",
+      "Bash(gh issue view *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr view *)",
+      "Bash(gh run list *)",
+      "Bash(gh run view *)",
+      "Bash(gh run watch *)",
+
+      "Bash(brew install *)",
+      "Bash(chmod *)",
+      "Bash(cp *)",
+      "Bash(curl *)",
+      "Bash(echo *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(ls *)",
+      "Bash(python3 -m json.tool *)",
+      "Bash(sort *)",
+      "Bash(source *)",
+      "Bash(test *)",
+      "Bash(wc *)"
     ]
   }
 }

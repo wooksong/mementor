@@ -1,0 +1,57 @@
+name: Deno
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      ts: ${{ steps.filter.outputs.ts }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        id: filter
+        with:
+          filters: |
+            ts:
+              - '**/*.ts'
+
+  deno:
+    needs: changes
+    if: needs.changes.outputs.ts == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-mise-macos
+        with:
+          cache-key-prefix: deno
+      - name: Format check
+        run: mise run deno:fmt -- --check
+      - name: Type check
+        run: mise run deno:check
+      - name: Test
+        run: mise run deno:test
+
+  check-status:
+    needs: [deno]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check outcome
+        run: |
+          if [ "${{ needs.deno.result }}" = "failure" ] || \
+             [ "${{ needs.deno.result }}" = "cancelled" ]; then
+            echo "Deno check failed or was cancelled"
+            exit 1
+          else
+            echo "Deno check passed or was skipped"
+          fi

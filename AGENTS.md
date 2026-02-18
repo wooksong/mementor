@@ -238,6 +238,11 @@ following lints are explicitly allowed:
 - `missing_errors_doc`
 - `missing_panics_doc`
 
+### Deno Scripts
+
+Deno TypeScript scripts live under `.claude/`. Follow the conventions in
+[`docs/deno-script-conventions.md`](docs/deno-script-conventions.md).
+
 ### Dependency Management
 
 Use `cargo add` to add dependencies. **Do not edit `Cargo.toml` dependency
@@ -297,6 +302,11 @@ below.** Do not omit or assume any step is implicit.
 5. **Commit via `/commit`**: Use the `/commit` skill for every commit. Do not
    run `git commit` directly. Always update the history document (step 4)
    before committing.
+
+6. **Complete all TODOs before creating a PR**: Every TODO item in the history
+   document must be done before opening a pull request. If any item is found
+   to be infeasible during implementation, move it to a "Future work" section
+   with an explanation -- do not leave unfinished TODOs.
 
 ## Testing
 

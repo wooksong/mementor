@@ -3,7 +3,7 @@ name: worktree
 description: Manage git worktrees with automatic mise environment setup and branch cleanup
 disable-model-invocation: false
 argument-hint: "<list|add|remove> [args...]"
-allowed-tools: Bash, Read
+allowed-tools: Bash, Read, Bash(deno *)
 ---
 
 # Worktree Skill
@@ -73,9 +73,18 @@ Display the output to the user.
       ```
       Skip `mise trust mise.local.toml` if the file was not copied.
 
-3. **Verify** by running `git worktree list` and displaying the result.
+3. **Set up Claude Code settings** for the new worktree:
+   ```bash
+   deno run --allow-read --allow-write \
+     <main-worktree>/.claude/skills/worktree/scripts/worktree_settings.ts \
+     setup <main-worktree> <new-worktree>
+   ```
+   This copies `settings.local.json` to the new worktree and generates
+   `git -C` permission entries in the main worktree's `settings.local.json`.
 
-4. **Report** the new worktree path and branch name to the user.
+4. **Verify** by running `git worktree list` and displaying the result.
+
+5. **Report** the new worktree path and branch name to the user.
 
 ---
 
@@ -99,7 +108,16 @@ and identify the associated branch.
    worktree being removed, `cd` to the primary worktree first (the first entry
    from `git worktree list --porcelain`).
 
-2. **Remove the worktree**:
+2. **Clean up Claude Code settings** before removing:
+   ```bash
+   deno run --allow-read --allow-write \
+     <main-worktree>/.claude/skills/worktree/scripts/worktree_settings.ts \
+     cleanup <main-worktree> <removed-worktree-path>
+   ```
+   This merges any new permissions from the removed worktree back to the main
+   worktree's `settings.local.json` and removes `git -C` entries.
+
+3. **Remove the worktree**:
    ```bash
    git worktree remove <path>
    ```
@@ -113,7 +131,7 @@ and identify the associated branch.
    ```
    If the user declines, abort.
 
-3. **Delete the associated branch**:
+4. **Delete the associated branch**:
    ```bash
    git branch -d <branch>
    ```
@@ -127,9 +145,9 @@ and identify the associated branch.
    ```
    If the user declines, keep the branch and inform them.
 
-4. **Prune stale references**:
+5. **Prune stale references**:
    ```bash
    git worktree prune
    ```
 
-5. **Verify** by running `git worktree list` and displaying the result.
+6. **Verify** by running `git worktree list` and displaying the result.
