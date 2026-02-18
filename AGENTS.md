@@ -81,19 +81,15 @@ mementor/
 
 ## Git Worktree
 
-When working in a separate `git worktree`, change into the worktree directory
-first, then run:
+**Always use the `/worktree` skill when managing git worktrees.** Do not run
+`git worktree add` or `git worktree remove` directly. The `/worktree` skill
+handles mise environment setup (copying `mise.local.toml`, trusting config
+files, installing the toolchain) and branch cleanup automatically.
 
-```bash
-cp <main-worktree>/mise.local.toml .   # x86_64 macOS only (ORT_DYLIB_PATH)
-mise trust
-mise trust mise.local.toml
-mise install
-```
-
-This is required because mise does not auto-trust config files outside the
-original repository path. Without these steps, `cargo` and other mise-managed
-tools will not be available inside the worktree.
+Background: mise does not auto-trust config files outside the original
+repository path. Without proper setup, `cargo` and other mise-managed tools
+will not be available inside the worktree. The `/worktree` skill ensures this
+is handled correctly.
 
 ## Build
 
@@ -268,12 +264,8 @@ and future work items.
 Every implementation task **must** follow this workflow:
 
 1. **Create a feature branch**: Use the `AskUserQuestion` tool to ask the user
-   whether to use `git worktree add` (separate worktree) or `git checkout -b`
-   (current directory). If the user chooses a worktree, set up the environment
-   after creation:
-   - Copy `mise.local.toml` from the main worktree (gitignored, machine-local).
-   - Run `mise trust` to trust the configuration.
-   - Run `mise install` to install the toolchain.
+   whether to use a separate worktree or the current directory. If worktree,
+   run `/worktree add <branch>`. If current directory, use `git checkout -b`.
 
 2. **Create a history document**: Before writing any code, create a task
    document at `history/YYYY-MM-DD_task-name.md` with background, goals,
