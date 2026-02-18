@@ -81,23 +81,29 @@ handles this naturally via provisional turn reprocessing.
 
 | File | Change |
 |------|--------|
-| `crates/mementor-lib/src/transcript/types.rs` | Add `Thinking` + `Unknown` variants, update `extract_text()` |
-| `crates/mementor-lib/src/transcript/parser.rs` | No code change needed (delegates to `extract_text()`) |
+| `crates/mementor-lib/src/transcript/types.rs` | Add `Thinking` + `Unknown` variants, update `extract_text()`, add `has_unknown_blocks()` |
+| `crates/mementor-lib/src/transcript/parser.rs` | Add `debug!` log with raw JSONL line for unknown block types |
 
 ## TODO
 
-- [ ] Add `Thinking` variant with `thinking: Option<String>` and `signature: Option<String>`
-- [ ] Add `#[serde(other)] Unknown` variant
-- [ ] Update `extract_text()` match arms
-- [ ] Add test: `deserialize_thinking_block`
-- [ ] Add test: `deserialize_thinking_block_none` (`thinking: null`)
-- [ ] Add test: `deserialize_thinking_block_empty` (`thinking: ""`)
-- [ ] Add test: `unknown_block_type_skipped`
-- [ ] Add test: `thinking_and_text_interleaved`
-- [ ] Add test: `only_thinking_block_produces_text`
-- [ ] Update existing `deserialize_blocks_content` to include a thinking block
-- [ ] Verify: clippy + all tests pass
+- [x] Add `Thinking` variant with `thinking: Option<String>` and `signature: Option<String>`
+- [x] Add `#[serde(other)] Unknown` variant
+- [x] Update `extract_text()` match arms
+- [x] Add `has_unknown_blocks()` method to `Content`
+- [x] Add `debug!` logging in `parser.rs` for unknown blocks (includes raw line)
+- [x] Add test: `deserialize_thinking_block`
+- [x] Add test: `deserialize_thinking_block_none` (`thinking: null`)
+- [x] Add test: `deserialize_thinking_block_empty` (`thinking: ""`)
+- [x] Add test: `unknown_block_type_skipped`
+- [x] Add test: `thinking_and_text_interleaved`
+- [x] Add test: `only_thinking_block_produces_text`
+- [x] Update existing `deserialize_blocks_content` to include a thinking block
+- [x] Add test: `parse_message_with_thinking_blocks` (parser integration)
+- [x] Add test: `parse_message_with_unknown_blocks` (parser integration)
+- [x] Verify: clippy + all tests pass
 
-## Estimated Scope
+## Results
 
-~30 lines of code change + ~40 lines of test.
+- All 114 tests pass (75 lib + 39 cli), including 9 new tests
+- Clippy passes with zero warnings
+- Scope: types.rs (~40 lines code + ~75 lines test), parser.rs (~5 lines code + ~20 lines test)

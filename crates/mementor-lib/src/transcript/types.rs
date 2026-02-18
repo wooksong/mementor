@@ -33,6 +33,12 @@ pub enum Content {
 pub enum ContentBlock {
     #[serde(rename = "text")]
     Text { text: String },
+    #[serde(rename = "thinking")]
+    Thinking {
+        thinking: Option<String>,
+        #[allow(dead_code)]
+        signature: Option<String>,
+    },
     #[serde(rename = "tool_use")]
     ToolUse {
         #[allow(dead_code)]
@@ -45,10 +51,13 @@ pub enum ContentBlock {
         #[allow(dead_code)]
         tool_use_id: Option<String>,
     },
+    #[serde(other)]
+    Unknown,
 }
 
 impl Content {
-    /// Extract all text content, skipping `tool_use` and `tool_result` blocks.
+    /// Extract all text content from `text` and `thinking` blocks.
+    /// Skips `tool_use`, `tool_result`, and unknown block types.
     pub fn extract_text(&self) -> String {
         match self {
             Content::Text(s) => s.clone(),
@@ -57,11 +66,24 @@ impl Content {
                     .iter()
                     .filter_map(|block| match block {
                         ContentBlock::Text { text } => Some(text.as_str()),
-                        ContentBlock::ToolUse { .. } | ContentBlock::ToolResult { .. } => None,
+                        ContentBlock::Thinking { thinking, .. } => {
+                            thinking.as_deref().filter(|s| !s.is_empty())
+                        }
+                        ContentBlock::ToolUse { .. }
+                        | ContentBlock::ToolResult { .. }
+                        | ContentBlock::Unknown => None,
                     })
                     .collect();
                 texts.join("\n\n")
             }
+        }
+    }
+
+    /// Returns `true` if any content block deserialized as `Unknown`.
+    pub fn has_unknown_blocks(&self) -> bool {
+        match self {
+            Content::Text(_) => false,
+            Content::Blocks(blocks) => blocks.iter().any(|b| matches!(b, ContentBlock::Unknown)),
         }
     }
 }
@@ -83,6 +105,7 @@ mod tests {
         let json = r#"{
             "role": "assistant",
             "content": [
+                {"type": "thinking", "thinking": "Let me analyze this"},
                 {"type": "text", "text": "Here is the code:"},
                 {"type": "tool_use", "id": "t1", "name": "write"},
                 {"type": "text", "text": "Done."}
@@ -90,7 +113,10 @@ mod tests {
         }"#;
         let msg: Message = serde_json::from_str(json).unwrap();
         assert_eq!(msg.role, "assistant");
-        assert_eq!(msg.content.extract_text(), "Here is the code:\n\nDone.");
+        assert_eq!(
+            msg.content.extract_text(),
+            "Let me analyze this\n\nHere is the code:\n\nDone."
+        );
     }
 
     #[test]
@@ -125,5 +151,80 @@ mod tests {
         assert_eq!(entry.entry_type.as_deref(), Some("user"));
         assert_eq!(entry.session_id.as_deref(), Some("sess-1"));
         assert!(entry.message.is_some());
+    }
+
+    #[test]
+    fn deserialize_thinking_block() {
+        let json = r#"{
+            "role": "assistant",
+            "content": [{"type": "thinking", "thinking": "I chose X because Y"}]
+        }"#;
+        let msg: Message = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.content.extract_text(), "I chose X because Y");
+    }
+
+    #[test]
+    fn deserialize_thinking_block_none() {
+        let json = r#"{
+            "role": "assistant",
+            "content": [{"type": "thinking"}]
+        }"#;
+        let msg: Message = serde_json::from_str(json).unwrap();
+        assert!(msg.content.extract_text().is_empty());
+    }
+
+    #[test]
+    fn deserialize_thinking_block_empty() {
+        let json = r#"{
+            "role": "assistant",
+            "content": [{"type": "thinking", "thinking": ""}]
+        }"#;
+        let msg: Message = serde_json::from_str(json).unwrap();
+        assert!(msg.content.extract_text().is_empty());
+    }
+
+    #[test]
+    fn unknown_block_type_skipped() {
+        let json = r#"{
+            "role": "assistant",
+            "content": [
+                {"type": "server_tool_use", "id": "x"},
+                {"type": "text", "text": "result"}
+            ]
+        }"#;
+        let msg: Message = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.content.extract_text(), "result");
+        assert!(msg.content.has_unknown_blocks());
+    }
+
+    #[test]
+    fn thinking_and_text_interleaved() {
+        let json = r#"{
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "First thought"},
+                {"type": "text", "text": "First response"},
+                {"type": "thinking", "thinking": "Second thought"},
+                {"type": "text", "text": "Second response"}
+            ]
+        }"#;
+        let msg: Message = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            msg.content.extract_text(),
+            "First thought\n\nFirst response\n\nSecond thought\n\nSecond response"
+        );
+    }
+
+    #[test]
+    fn only_thinking_block_produces_text() {
+        let json = r#"{
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "Deep reasoning here"}
+            ]
+        }"#;
+        let msg: Message = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.content.extract_text(), "Deep reasoning here");
+        assert!(!msg.content.has_unknown_blocks());
     }
 }

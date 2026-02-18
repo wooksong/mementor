@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::Context;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use super::types::TranscriptEntry;
 
@@ -54,6 +54,10 @@ pub fn parse_transcript(path: &Path, start_line: usize) -> anyhow::Result<Vec<Pa
         let Some(message) = entry.message else {
             continue;
         };
+
+        if message.content.has_unknown_blocks() {
+            debug!(line = line_idx, raw = %line, "skipped unknown content block type(s)");
+        }
 
         let role = message.role.as_str();
         if role != "user" && role != "assistant" {
@@ -163,5 +167,28 @@ mod tests {
 
         let msgs = parse_transcript(f.path(), 0).unwrap();
         assert_eq!(msgs.len(), 1);
+    }
+
+    #[test]
+    fn parse_message_with_thinking_blocks() {
+        let f = write_jsonl(&[
+            r#"{"type":"user","message":{"role":"user","content":"Why?"}}"#,
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Because X"},{"type":"text","text":"Here is why."}]}}"#,
+        ]);
+
+        let msgs = parse_transcript(f.path(), 0).unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[1].text, "Because X\n\nHere is why.");
+    }
+
+    #[test]
+    fn parse_message_with_unknown_blocks() {
+        let f = write_jsonl(&[
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"server_tool_use","id":"x"},{"type":"text","text":"Done"}]}}"#,
+        ]);
+
+        let msgs = parse_transcript(f.path(), 0).unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].text, "Done");
     }
 }
