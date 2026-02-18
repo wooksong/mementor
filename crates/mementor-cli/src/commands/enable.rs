@@ -131,9 +131,10 @@ fn configure_hooks(ctx: &MementorContext) -> anyhow::Result<()> {
 
 /// Upsert a mementor hook entry into the event array.
 ///
-/// Removes any existing mementor entries (commands starting with "mementor")
-/// for this event, then appends the new entry. Non-mementor entries are
-/// preserved unchanged.
+/// If an entry with the exact same command already exists, it is left
+/// untouched (preserving the original key order). Otherwise, any existing
+/// mementor entries (commands starting with "mementor") are removed and the
+/// new entry is appended. Non-mementor entries are always preserved.
 fn upsert_hook_entry(
     hooks_obj: &mut serde_json::Map<String, serde_json::Value>,
     event_name: &str,
@@ -144,6 +145,23 @@ fn upsert_hook_entry(
         .or_insert_with(|| serde_json::json!([]));
 
     if let Some(arr) = arr.as_array_mut() {
+        let target_cmd = hook_entry["hooks"]
+            .as_array()
+            .and_then(|h| h.first())
+            .and_then(|h| h["command"].as_str());
+
+        let already_exists = target_cmd.is_some_and(|cmd| {
+            arr.iter().any(|entry| {
+                entry["hooks"]
+                    .as_array()
+                    .is_some_and(|hooks| hooks.iter().any(|h| h["command"].as_str() == Some(cmd)))
+            })
+        });
+
+        if already_exists {
+            return;
+        }
+
         arr.retain(|entry| {
             !entry["hooks"].as_array().is_some_and(|hooks| {
                 hooks.iter().any(|h| {
@@ -694,5 +712,79 @@ mod tests {
                |"#,
         );
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn try_run_enable_preserves_existing_key_order() {
+        let (_tmp, runtime) = runtime_in_memory("enable_existing_order");
+        let mut io = BufferedIO::new();
+
+        let claude_dir = runtime
+            .context
+            .claude_settings_path()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(&claude_dir).unwrap();
+
+        // Real-world settings.json: "command" before "type" (Claude Code's ordering)
+        let input = crate::test_util::_trim_margin(
+            r#"|{
+               |  "attribution": {
+               |    "commit": "",
+               |    "pr": ""
+               |  },
+               |  "hooks": {
+               |    "PreCompact": [
+               |      {
+               |        "hooks": [
+               |          {
+               |            "command": "mementor hook pre-compact",
+               |            "type": "command"
+               |          }
+               |        ]
+               |      }
+               |    ],
+               |    "Stop": [
+               |      {
+               |        "hooks": [
+               |          {
+               |            "command": "mementor hook stop",
+               |            "type": "command"
+               |          }
+               |        ]
+               |      }
+               |    ],
+               |    "UserPromptSubmit": [
+               |      {
+               |        "hooks": [
+               |          {
+               |            "command": "mementor hook user-prompt-submit",
+               |            "type": "command"
+               |          }
+               |        ]
+               |      }
+               |    ]
+               |  },
+               |  "permissions": {
+               |    "allow": [
+               |      "Bash(cargo:*)",
+               |      "Bash(rustc --print:*)",
+               |      "Bash(./scripts/update-sqlite-vector.sh:*)",
+               |      "Bash(ls:*)",
+               |      "Bash(find:*)",
+               |      "Bash(grep:*)",
+               |      "Skill(commit)",
+               |      "Skill(worktree)"
+               |    ]
+               |  }
+               |}"#,
+        );
+        std::fs::write(runtime.context.claude_settings_path(), format!("{input}\n")).unwrap();
+
+        crate::try_run(&["mementor", "enable"], &runtime, &mut io).unwrap();
+
+        let actual = std::fs::read_to_string(runtime.context.claude_settings_path()).unwrap();
+        assert_eq!(actual, format!("{input}\n"));
     }
 }
