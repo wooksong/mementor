@@ -1,6 +1,52 @@
-# Integration Test Patterns
+# Testing Patterns
 
-This document describes the standard integration test pattern for mementor-cli
+## General Assertion Guidelines
+
+These rules apply to **all** tests (unit and integration).
+
+### Prefer exact comparison over partial matching
+
+Use `assert_eq!` with complete expected values. Never use `contains()`,
+`starts_with()`, or position-based indexing for assertions that should verify
+exact output. Partial matching silently passes when output changes in
+unexpected ways.
+
+```rust
+// Good
+assert_eq!(result, "expected full value");
+
+// Bad — won't catch extra/missing content
+assert!(result.contains("expected"));
+```
+
+### Compare complete structs, not individual fields
+
+Derive `PartialEq` on types used in test assertions and compare entire structs
+in a single `assert_eq!`. This is more concise and catches regressions in any
+field.
+
+```rust
+// Good — one assertion covers all fields
+assert_eq!(
+    turns,
+    vec![Turn { line_index: 0, provisional: true, text: "...".to_string() }]
+);
+
+// Bad — misses regressions in unchecked fields
+assert_eq!(turns.len(), 1);
+assert_eq!(turns[0].line_index, 0);
+```
+
+### Use `assert!` only for boolean conditions
+
+Reserve `assert!(...)` for conditions where exact value comparison does not
+apply: `is_empty()`, `len() > 1`, boolean predicates.
+
+---
+
+## Integration Test Patterns
+
+This section describes the standard integration test pattern for mementor-cli
 subcommands. All new subcommand tests should follow these conventions.
 
 ## The 5 Rules
