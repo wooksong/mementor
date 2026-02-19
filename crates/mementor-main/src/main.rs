@@ -1,15 +1,21 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use mementor_lib::context::MementorContext;
 use mementor_lib::db::driver::DatabaseDriver;
+use mementor_lib::git::resolve_worktree;
 use mementor_lib::output::StdIO;
 use mementor_lib::runtime::Runtime;
 
 fn main() -> anyhow::Result<()> {
-    // 1. Read env + create context
+    // 1. Read env + classify worktree type + resolve project root
     let cwd = std::env::current_dir()?;
+    let resolved = resolve_worktree(&cwd);
+    let is_linked = resolved.is_linked();
+    let project_root = resolved
+        .primary_root()
+        .map_or_else(|| cwd.clone(), Path::to_path_buf);
     let log_dir = std::env::var("MEMENTOR_LOG_DIR").ok().map(PathBuf::from);
-    let context = MementorContext::with_log_dir(cwd, log_dir);
+    let context = MementorContext::with_cwd_and_log_dir(cwd, project_root, is_linked, log_dir);
 
     // 2. Init file logging (no-op if log_dir is None)
     mementor_cli::logging::init_file_logging(&context);

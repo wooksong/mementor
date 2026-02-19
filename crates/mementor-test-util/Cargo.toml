@@ -1,0 +1,10 @@
+[package]
+name = "mementor-test-util"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3.25.0"

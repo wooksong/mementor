@@ -17,6 +17,8 @@ static ENTRY_COUNTER: AtomicUsize = AtomicUsize::new(0);
 /// temporary directory alive for the duration of the test.
 pub fn runtime_in_memory(name: &str) -> (tempfile::TempDir, Runtime) {
     let tmp = tempfile::tempdir().unwrap();
+    // Create a bare .git directory so that the tempdir looks like a git repo.
+    std::fs::create_dir(tmp.path().join(".git")).unwrap();
     let ctx = MementorContext::new(tmp.path().to_path_buf());
     let db = DatabaseDriver::in_memory(name).unwrap();
     let runtime = Runtime { context: ctx, db };

@@ -1706,6 +1706,7 @@ dependencies = [
  "clap",
  "jiff",
  "mementor-lib",
+ "mementor-test-util",
  "serde",
  "serde_json",
  "sha2",
@@ -1722,6 +1723,7 @@ dependencies = [
  "cc",
  "dirs",
  "fastembed",
+ "mementor-test-util",
  "rusqlite",
  "rusqlite_migration",
  "serde",
@@ -1731,6 +1733,13 @@ dependencies = [
  "tokenizers",
  "tracing",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "mementor-test-util"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
 ]
 
 [[package]]

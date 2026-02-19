@@ -51,6 +51,7 @@ mementor/
       src/lib.rs          CLI command dispatch
     mementor-main/        Thin binary entry point
       src/main.rs         main() -- wires DI, calls CLI
+    mementor-test-util/   Shared test utilities (dev-dependency only)
 
   vendor/
     sqlite-vector/
@@ -78,6 +79,10 @@ mementor/
 - **mementor-main**: The `[[bin]]` crate (binary name: `mementor`). Constructs
   real implementations of all traits and passes them to mementor-cli. Should
   contain minimal logic -- just wiring.
+
+- **mementor-test-util**: Shared test helpers used by multiple crates. Git
+  repository helpers (`init_git_repo`, `run_git`), path assertion utilities
+  (`assert_paths_eq`). Has no mementor dependencies. Dev-dependency only.
 
 ## Git Worktree
 
@@ -328,5 +333,6 @@ mise run test:unit
 Tests should be colocated with the code they test (in `#[cfg(test)]` modules)
 for unit tests. Integration tests go in `tests/` directories within each crate.
 
-For the standard subcommand-level integration test pattern (5 rules, helpers,
-and annotated examples), see [`docs/testing-patterns.md`](docs/testing-patterns.md).
+**All subcommand-level integration tests MUST follow the 5 rules in
+[`docs/testing-patterns.md`](docs/testing-patterns.md).** Read that document
+before writing any new integration test. Non-compliant tests will be rejected.

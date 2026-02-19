@@ -2,6 +2,7 @@ pub mod config;
 pub mod context;
 pub mod db;
 pub mod embedding;
+pub mod git;
 pub mod output;
 pub mod pipeline;
 pub mod runtime;

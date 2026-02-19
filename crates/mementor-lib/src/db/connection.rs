@@ -48,8 +48,13 @@ pub fn open_db_in_memory(name: &str) -> anyhow::Result<Connection> {
     Ok(conn)
 }
 
-/// Load sqlite-vector extension, apply schema migrations, and register vector table.
+/// Load sqlite-vector extension, apply schema migrations, register vector table,
+/// and configure WAL mode for safe concurrent access from multiple worktrees.
 fn init_connection(conn: &mut Connection) -> anyhow::Result<()> {
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .context("Failed to enable WAL mode")?;
+    conn.pragma_update(None, "busy_timeout", 5000)
+        .context("Failed to set busy_timeout")?;
     register_vector_extension(conn)?;
     apply_migrations(conn)?;
     register_vector_table(conn)?;
@@ -141,6 +146,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(val, 42);
+    }
+
+    #[test]
+    fn wal_mode_is_active() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("test_wal.db");
+        let conn = open_db(&db_path).unwrap();
+
+        let mode: String = conn
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode.to_lowercase(), "wal");
+    }
+
+    #[test]
+    fn busy_timeout_is_set() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("test_timeout.db");
+        let conn = open_db(&db_path).unwrap();
+
+        let timeout: i64 = conn
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+        assert_eq!(timeout, 5000);
     }
 
     #[test]

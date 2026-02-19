@@ -36,4 +36,5 @@ fastembed = { version = "5.9.0", default-features = false, features = [
 cc = "1.2.56"
 
 [dev-dependencies]
+mementor-test-util = { path = "../mementor-test-util" }
 tempfile = "3.25.0"
